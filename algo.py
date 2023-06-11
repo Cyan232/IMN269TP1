@@ -1,101 +1,95 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-#
+
 imSize = []
 clickedPoints = 0
 points = []
+H2 = np.array([[1.0,0.0,0.0], [0.0,1.0,0.0], [0.0, 0.0, 1.0]])
 
-# Function to handle mouse click events
-def mouse_callback(event, x, y, flags, param):
+#Conversion des points en droites
+def PointsToDroite(pts1, pts2):
+    a = np.hstack((pts1, 1))
+    b = np.hstack((pts2, 1))
+    d = np.cross(a, b)
+    d = d / np.linalg.norm(d) 
+    return d
+
+# Function pour capturer les points
+def onMouse_Callback(event, x, y, flags, param):
     global clickedPoints, points,imSize
-    xval = imSize[0] / 2
-    yval = imSize[1] / 2
     if event == cv2.EVENT_LBUTTONDOWN:
         clickedPoints += 1
-        points.append((((x)/100), (y/100), 1))
-        # print("Clicked at position: ({}, {})".format(x, y))
-        # print("Clicked at position in cebtered: ({}, {})".format(x - xval, -y + yval))
+        points.append([x, y])
 
+def onWheel_Callback(event, x, y, flags, param):
+    global H2, imSize, image
 
-# Read the image using OpenCV
-image = cv2.imread("img.png")
+    if event == cv2.EVENT_MOUSEWHEEL:
+        scale_change = 0.1
+        if flags > 0:
+            H2[0, 0] += scale_change
+            H2[1, 1] += scale_change
+        else:
+            H2[0, 0] -= scale_change
+            H2[1, 1] -= scale_change
+
+        result = np.zeros_like(image)
+        result = cv2.warpPerspective(image, H2, (imSize[0], imSize[1]))
+        cv2.imshow(param, result)
+
+#Lecture de l'image
+image = cv2.imread("img1.png")
 imSize = image.shape
-print(imSize)
-
-# Convert the image to grayscale
-gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
 cv2.namedWindow("Image")
 
-# Set the mouse callback function for the window
-cv2.setMouseCallback("Image", mouse_callback)
+# Ajoute le callback pour choisir les points
+cv2.setMouseCallback("Image", onMouse_Callback)
 
-# Display the image
 cv2.imshow("Image", image)
 
-# Wait until the desired number of clicks is reached or the window is closed
-while clickedPoints < 4:
+#Capture des points
+while clickedPoints < 8:
     cv2.waitKey(1)
 
-# Close the window
 cv2.destroyAllWindows()
 
-#76 158
-#113 138
-#101 190
-#140 163
-# points[0] = (76/100, 158/100, 1)
-# points[1] = (113/100, 138/100, 1)
-# points[2] = (101/100, 190/100, 1)
-# points[3] = (140/100, 163/100, 1)
+#Dessine les droites choisi
+temp = cv2.line(image, points[0], points[1], (0,255,0), 2)
+temp = cv2.line(image, points[2], points[3], (0,255,0), 2)
+temp = cv2.line(image, points[4], points[5], (0,255,0), 2)
+temp = cv2.line(image, points[6], points[7], (0,255,0), 2)
 
+#Calculs des valeur pour trouver H_2
+droite1 = PointsToDroite(points[0], points[1])
+droite2 = PointsToDroite(points[2], points[3])
+droite3 = PointsToDroite(points[4], points[5])
+droite4 = PointsToDroite(points[6], points[7])
 
-droite1 = np.cross(points[0], points[1])
-droite2 = np.cross(points[2], points[3])
 f1 = np.cross(droite1, droite2)
-
-droite3 = np.cross(points[1], points[3])
-droite4 = np.cross(points[0], points[2])
 f2 = np.cross(droite3, droite4)
 
-hvals = np.cross(f1, f2)
-norm = np.linalg.norm(hvals)
-hvals /= norm
-print(hvals)
+f1 /= f1[2]
+f2 /= f2[2]
 
-H2 = np.array([[1,0,0], [0,1,0], [hvals[0], hvals[1], hvals[2]]])
-#H2 = np.array([[ 1, 0, hvals[0]], [ 0, 1, hvals[1]], [ 0, 0, hvals[2]]])
+d = np.cross(f1, f2)
+d /= d[2]
 
+H2 = np.array([[1.0,0.0,0.0], [0.0,1.0,0.0], [d[0], d[1], d[2]]])
+
+#Vérification de H2
+H2_inv = np.linalg.inv(H2)
+H2_inv_transpose = H2_inv.T
+infd = np.dot(H2_inv_transpose, d)
+print(infd)
+
+#On applique H2 a l'image
 result = np.zeros_like(image)
-halfX = imSize[0] / 2
-halfY = imSize[1] / 2
+result = cv2.warpPerspective(image, H2, [imSize[0], imSize[1]], result)
 
-for y in range(imSize[0]):
-    for x in range(imSize[1]):
-        # Access the pixel value at (x, y)
-        value = np.array([(x/100), (y/100), 1])
-        r = np.dot(H2, value)
-        r = np.abs(r)
-
-        # xval = np.int32(np.floor((r[0] / r[2])))
-        # yval = np.int32(np.floor((r[1] / r[2])))
-        xval = np.int32((r[0] * 100)/r[2])
-        yval = np.int32((r[1]*100)/r[2])
-
-        # print((((r[0] / r[2])), ((r[1] / r[2]))))
-        # print((xval, yval))
-        # print(r)
-
-        if xval < imSize[0] and yval < imSize[1] and xval > 0 and yval > 0:
-            result[xval, yval, :] = image[x, y, :]
-
-mask = (result == 0).all(axis=2)
-image_filled = cv2.inpaint(result, mask.astype(np.uint8), 3, cv2.INPAINT_NS)
-
-cv2.imshow("Image", result)
-
+cv2.imshow("ImageWithLines", temp)
+cv2.namedWindow("Final")
+cv2.imshow("Final", result)
+cv2.setMouseCallback("Final", onWheel_Callback, "Final")
 cv2.waitKey(0)
-
-# Close the window
 cv2.destroyAllWindows()
